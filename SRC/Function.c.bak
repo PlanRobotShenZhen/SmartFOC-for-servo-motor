@@ -1,0 +1,1193 @@
+#include "DSP2803x_Device.h"     // Headerfile Include File
+#include "DSP2803x_Examples.h"   // Examples Include File
+#include "ExternGlobals.h"
+void SysErrManage(void);
+void DixianManage(void);
+int DcMinErr=0;
+int DcMaxErr=0;
+int DcArrestDelay=0;
+int DcArrest2Delay=0;
+int EleCurrent10ACount=0;
+int WobbleCount=0;
+int SpeedRefMaxTmp=0;
+int Hmeastmp =0;
+int AdSpdLCount=0;
+int SysErrDelay=0;
+int SysErrSaveTmp2=0;
+int ImeasCheck(int ImeasA,int ImeasB);
+void LostPhase(void);
+void LostCoder(void);
+void TorsionAnalyse(void);
+void ResetVarAll(void);
+void SaveVar(void);
+void AddNeedle(void);
+void Rotor(void);
+int ImeasCheck(int ImeasA,int ImeasB)
+{    
+     static int ImeaTemp=0;
+     static int ImebTemp=0;
+     static int ImecTemp=0;
+     static int ImeasACheck=0;
+     static int ImeasBCheck=0;
+     static int ImeasCCheck=0; 
+                 
+     ImeasACheck =(Abs(ImeasA))>>2;
+     ImeasBCheck =(Abs(ImeasB))>>2;
+     ImeasCCheck =(Abs(ImeasA+ImeasB))>>2; 
+                         
+     if(ImeasACheck==0)
+     {
+          ImeaTemp++;
+     }           
+     else
+     {
+          ImeaTemp=0;
+     }
+     if(((RotorMacAngle&0x3ff)<800)&&((RotorMacAngle&0x3ff)>650))
+     {
+          ImeaTemp=0;
+     } 
+     if(ImeasBCheck==0)
+     {
+          ImebTemp++;
+      }           
+      else
+      {
+          ImebTemp=0;
+      }
+
+      if(((RotorMacAngle&0x3ff)<150)&&((RotorMacAngle&0x3ff)>10))
+      {
+            ImebTemp=0;
+      }
+      if(ImeasCCheck==0)
+      {
+            ImecTemp++;
+      }
+      else
+      {
+            ImecTemp=0;
+      }
+      if(((RotorMacAngle&0x3ff)<330)&&((RotorMacAngle&0x3ff)>280))
+      {
+            ImebTemp=0;
+      }   
+      if(ImeaTemp>ImeMax)
+      {
+            return M_SYSERR_LACKPHASE ;
+       }
+       if(ImebTemp>ImeMax)
+       {
+             return M_SYSERR_LACKPHASE ;
+
+       }
+       if(ImecTemp>ImeMax)
+       {
+             return M_SYSERR_LACKPHASE ;
+       }
+       return 0;
+}
+
+
+void LostPhase(void)
+{
+   if(MotorRunFlag) 
+   {             
+       if((((Abs(ImeasA))>>2)==0)&&(((Abs(ImeasB))>>2)==0))
+       {
+           if(SpeedFdb<=3)
+           {
+                ImeasCheckDelay++;
+                if(ImeasCheckDelay>=LowSpeedTimer)
+                {
+                   SysErr =M_SYSERR_LACKPHASE;
+                }
+           }
+           else
+           {
+                ImeasCheckDelay=0;
+           }
+        }
+
+        else if(ImeasCheck( ImeasA, ImeasB))
+        {
+             SysErr =M_SYSERR_LACKPHASE;
+        }
+     }
+     else
+     {
+         ImeasCheckDelay=0;
+     }
+}
+
+
+void LostCoder(void)
+{
+      CoderTimer++; 
+      if((SpiRxData&0x3)==0x2)//3 通讯故障/2 正常 /1 倒下，0 编码器内部故，但通讯正常
+      {
+           CoderTimer=0;  
+      }
+
+      else if((SpiRxData&0x3)==0x1) //1 倒下
+      {
+           if(SafetySwitchType==0)
+           {
+               SysErr =M_SYSERR_CODERDOWN;
+           } 
+           CoderTimer=0;
+      }
+      else if((SpiRxData&0x3)==0x0)//0 编码器内部故，但通讯正常
+      {
+           SysErr =M_SYSERR_CODERNESS;
+           CoderTimer=0;
+      }
+
+      if(CoderTimer>=3)
+      {
+           CoderTimer=3;
+           SysErr =  M_SYSERR_CODER;
+      }
+      
+      if(SysErr==M_SYSERR_FOOT_CONTROLLER_DOWN)
+      {
+           if(AdSpdRef==0)
+           {
+               SysErr= M_SYSERR_NULL; 
+           } 
+       }
+}
+
+
+void TorsionAnalyse(void)
+{
+     if((svpwm.IQs) >(IqsMax-20))
+     {    
+        OverLoadTimer++;
+        if(SpeedFdb<5)//堵转
+        {
+            if(OverLoadTimer>=(IqsMaxOverTime*10))
+            {
+               OverLoadTimer=IqsMaxOverTime*10;
+               SysErr = M_SYSERR_ROTOR_LOCKED ;      
+            }
+        }
+        else //过载
+        {
+             if(OverLoadTimer>=(IqsMaxOverTime*20))
+             {
+                 OverLoadTimer=IqsMaxOverTime*20;
+                 SysErr = M_SYSERR_OVER_LOAD;      
+             }
+        }
+     }
+     else
+     {
+         OverLoadTimer=0;
+     }
+} 
+
+
+void SaveVar(void)
+{
+    if(SvaeSFlag==1)
+    {
+         if(Eeprom1.StateFlag==0)
+         {
+              Eeprom1.Page=0;
+              Eeprom1.Dats=SysVar[SysVarNum];
+              Eeprom1.Add = SysVarNum;
+              Eeprom1.StateFlag=1;//写起动  
+              Eeprom1.EndFalg=1; //Eeprom1正忙                 
+         }
+                
+         if(Eeprom1.EndFalg==1)
+         {
+              if(Eeprom1.StateFlag==5)
+               {
+                   Eeprom1.EndFalg=0;
+                   Eeprom1.StateFlag=0;
+                   SvaeSFlag=0;
+               }
+          }
+    } 
+    if(SvaeSUserFlag==1)
+    {
+         if(Eeprom1.StateFlag==0)
+         {
+              Eeprom1.Page=1;
+              Eeprom1.Dats=SysVarUser[SysVarUserNum];
+              Eeprom1.Add = SysVarUserNum;
+              Eeprom1.StateFlag=1;//写起动  
+              Eeprom1.EndFalg=1; //Eeprom1正忙                 
+         }
+                
+         if(Eeprom1.EndFalg==1)
+         {
+              if(Eeprom1.StateFlag==5)
+               {
+                   Eeprom1.EndFalg=0;
+                   Eeprom1.StateFlag=0;
+                   SvaeSFlag=0;
+               }
+          }
+    }  
+    if(SvaeMFlag==1)
+    {
+         if(Eeprom1.StateFlag==0)
+         {
+              Eeprom1.Page=3;
+              Eeprom1.Dats=MotorVar[MotorVarNum];
+              Eeprom1.Add = MotorVarNum;
+              Eeprom1.StateFlag=1;//写起动  
+              Eeprom1.EndFalg=1; //Eeprom1正忙                 
+          }
+                
+         if(Eeprom1.EndFalg==1)
+         {
+              if(Eeprom1.StateFlag==5)
+              {
+                     Eeprom1.EndFalg=0;
+                     Eeprom1.StateFlag=0;
+                     SvaeMFlag=0;
+              }
+  
+          }
+    } 
+    if(ResetSysVarUserFlag)
+    {
+          SysErr=M_SYSERR_SYSVARRESET;
+          ResetVarAllFlag=5; //SysVar ==> SysVerUser
+          ResetVarAll();
+          ResetVarAllFlag=0;
+          ResetSysVarUserFlag=0;
+          SysResetVar=2;                     
+    }
+    if( ResetVarAllFlag==1)
+    {
+          SysErr=M_SYSERR_SYSVARRESET;
+          ResetVarAll();      // SysVar
+          ResetVarAllFlag=3;  //Process
+          ResetVarAll();
+          
+          ResetVarAllFlag=2;  //SysVar==>SysVarUser
+          ResetVarAll();                    
+          
+          ResetVarAllFlag=4;  //MotorVar
+          ResetVarAll();
+          
+          ProcessNoPowerOff=1;
+          ResetVarAllFlag=0;
+          SysResetVar=2;
+     }
+}
+
+void AddNeedle(void)
+{
+     if((NeedleAddFalg)&&(AdSpdRef==0))
+     {  
+          if(NeedleAddFalg>=3)
+          {
+                MotorState=M_MOTOR_RUNING;
+                NeedleAddFalg--;
+                SpeedRef=NeedelAddSpeedRef;
+          }
+                
+          else  if(NeedleAddFalg==2)
+          {
+                NeedleAddFalg--; 
+                SpeedRef=0;
+          }
+          if(NeedleAddFalg==1)
+          {
+                MotorStopHorL=!MotorStopHorL;
+                MotorState=M_MOTOR_ARREST;
+                NeedleAddFalg--; 
+                SpeedRef=0;
+          }
+     }
+}
+
+void Rotor(void)
+{
+    if((!SemiFlag)&&((RotorMacAngle>>6)==SemiAngle)) 
+    {
+        RotorCount++;
+        DiXianFlag=1;
+        SemiFlag=1;
+    }
+    else if ((RotorMacAngle>>7)==16)  
+    {
+        SemiFlag=0;
+    }
+}
+
+void AdDeal(void)
+{
+       if(Hmeas>980)
+       {
+             SysErr = M_SYSERR_NO_FOOT_CONTROLLER;
+        } 
+        if(AdSpdCw==1)
+        {
+             Hmeastmp= -Hmeas;
+        }
+        else
+        {
+             Hmeastmp= Hmeas;
+         }
+
+         if(Hmeastmp<=AdSpdS+50) //剪线AD
+         {
+             AdSpdRef=2;
+             AdSpdLCount=0;
+         }
+         else if(Hmeastmp<=(AdSpdL+30))  //抬压脚AD   
+         {
+       
+               AdSpdLCount++;
+               if(AdSpdLCount>=100)
+               {
+                  if(AutoTaiYaJiao)//有没有半后踏功能 
+                  {
+                      AdSpdRef=3;
+                   }
+                }
+          }
+          else 
+          {
+              AdSpdLCount=0;
+              if((Hmeastmp-70)>AdSpdZ)
+              {
+                    WobbleCount=0;
+                    if((Hmeastmp-AdSpdZ-70)<AdSpdSlope)
+                    {
+                        AdSpdRefTmp=SpeedRefMin;
+                    }
+                    else
+                    {   
+                         AdSpdRefTmp=(int)((((long)(Hmeastmp-AdSpdZ-AdSpdSlope-70))*((long)SpeedRefMax))/((long)(AdSpdHZ-AdSpdSlope-80)));    
+                         if(AdSpdRefTmp<SpeedRefMin)AdSpdRefTmp=SpeedRefMin;
+                         if(AdSpdRefTmp>SpeedRefMax)AdSpdRefTmp=SpeedRefMax;
+                    }
+               }
+               else if((Hmeastmp-50)<(AdSpdZ))    
+               {
+                    WobbleCount++;
+                    if(WobbleCount>=5)
+                    {
+                        WobbleCount=5;
+                        AdSpdRefTmp=0;
+                    }
+                }
+                if(AdSpdRefTmp>SpeedRefMaxTmp)AdSpdRefTmp=SpeedRefMaxTmp;   //SpeedRefMaxTmp === >AllSpeedRefMax 
+                AdSpdRef= AdSpdRefTmp;   
+          }
+}
+
+void ResetVarAll(void)
+{
+       if(ResetVarAllFlag==1)//SysVar
+       {
+           SysVarNum=0;
+           while(1)
+           {
+              if(Eeprom1.StateFlag==0)
+              {
+                  Eeprom1.Page=0;
+                  Eeprom1.Dats=SysVarInitTable[SysVarNum];
+                  Eeprom1.Add=SysVarNum;    
+                  Eeprom1.StateFlag=1;//起动写  
+                  Eeprom1.EndFalg=1; //Eeprom1正忙                 
+              }  
+      
+              if(Eeprom1.EndFalg==1)//Eeprom1正忙 
+              {
+                  if(Eeprom1.StateFlag==5) //已完成写操作，不忙；
+                  {
+                      Eeprom1.EndFalg=0;    //取消忙位
+                      Eeprom1.StateFlag=0;
+                      SysVarNum++;
+                      if((SysVarNum)>=M_SYSVARNUM_MAX)
+                      {
+                          break;
+                      }
+                  }        
+              }
+
+            }
+            ResetVarAllFlag=0;
+        }
+        
+        if(ResetVarAllFlag==2)//SysVarUser
+        {
+            SysVarUserNum=0;
+            while(1)
+            {
+
+               if(Eeprom1.StateFlag==0)
+               {
+                  Eeprom1.Page=1;
+                  Eeprom1.Dats=SysVarInitTable[SysVarUserNum];
+                  Eeprom1.Add=SysVarUserNum;    
+                  Eeprom1.StateFlag=1;//起动写  
+                  Eeprom1.EndFalg=1; //Eeprom1正忙                 
+               }  
+      
+               if(Eeprom1.EndFalg==1)//Eeprom1正忙 
+               {
+                  if(Eeprom1.StateFlag==5) //已完成写操作，不忙；
+                  {
+                     Eeprom1.EndFalg=0;    //取消忙位
+                     Eeprom1.StateFlag=0;
+                     SysVarUserNum++;
+                     if((SysVarUserNum)>=M_SYSVARNUM_MAX)
+                      {
+                           break;
+                      }
+                  }        
+                }
+             }
+            ResetVarAllFlag=0;
+          }
+     
+     
+        if(ResetVarAllFlag==3) //ProcessVar
+        {
+            ProcessVarNum=0;
+            while(1)
+            {
+              if(Eeprom1.StateFlag==0)
+              {
+                  Eeprom1.Page=2;
+                  Eeprom1.Dats=ProcessVarInitTable[ProcessVarNum];  
+                  Eeprom1.Add=ProcessVarNum;  
+                  Eeprom1.StateFlag=1;//起动写  
+                  Eeprom1.EndFalg=1; //Eeprom1正忙                 
+              }  
+      
+              if(Eeprom1.EndFalg==1)//Eeprom1正忙 
+              {
+                 if(Eeprom1.StateFlag==5) //已完成写操作，不忙；
+                 {
+                    Eeprom1.EndFalg=0;    //取消忙位
+                    Eeprom1.StateFlag=0;
+                    ProcessVarNum++;
+                    if((ProcessVarNum)>=M_PROCESSVARNUM_MAX)
+                    {
+                          break;
+                    }
+                  }        
+               }
+            }
+            ResetVarAllFlag=0;
+         }
+
+         if(ResetVarAllFlag==4) //MotorVar
+         {
+              MotorVarNum=0;
+              while(1)
+              {              
+                  if(Eeprom1.StateFlag==0)
+                  {
+                      Eeprom1.Page=3;
+                      Eeprom1.Dats=MotorVarInitTable[MotorVarNum];
+                      Eeprom1.Add=MotorVarNum;    
+                      Eeprom1.StateFlag=1;//起动写  
+                      Eeprom1.EndFalg=1; //Eeprom1正忙                 
+                  }  
+      
+                  if(Eeprom1.EndFalg==1)//Eeprom1正忙 
+                  {
+                      if(Eeprom1.StateFlag==5) //已完成写操作，不忙；
+                      {
+                           Eeprom1.EndFalg=0;    //取消忙位
+                           Eeprom1.StateFlag=0;
+                           MotorVarNum++;
+                           if((MotorVarNum)>=M_MOTORVARNUM_MAX)
+                           {
+                               break;
+                           }
+                       }        
+                   }
+
+               }
+               ResetVarAllFlag=0;
+     }
+     
+     
+     if(ResetVarAllFlag==5) //SysVar==>SysVarUser
+     {
+          SysVarUserNum=0;
+          while(1)
+          {
+
+             if(Eeprom1.StateFlag==0)
+             {
+                  Eeprom1.Page=1;
+                  Eeprom1.Dats=SysVar[SysVarUserNum];
+                  Eeprom1.Add=SysVarUserNum;    
+                  Eeprom1.StateFlag=1;//起动写  
+                  Eeprom1.EndFalg=1; //Eeprom1正忙                 
+            }  
+      
+            if(Eeprom1.EndFalg==1)//Eeprom1正忙 
+            {
+               if(Eeprom1.StateFlag==5) //已完成写操作，不忙；
+               {
+                   Eeprom1.EndFalg=0;    //取消忙位
+                   Eeprom1.StateFlag=0;
+                   SysVarUserNum++;
+                   if((SysVarUserNum)>=M_SYSVARNUM_MAX)
+                   {
+                          break;
+                   }
+               }        
+             }
+
+           }
+            ResetVarAllFlag=0;
+     }     
+}
+
+
+
+void ReadEeprom(int Area)
+{
+        if(Area==0) //SysVar
+        {   
+             SysVarNum=0;
+             while(1)
+             {
+                  if(Eeprom1.StateFlag==0)
+                  {
+                        Eeprom1.Page=0;
+                        Eeprom1.StateFlag=3;//读起动  
+                        Eeprom1.EndFalg=1; //Eeprom1正忙
+                        Eeprom1.Add=SysVarNum;                 
+                   }   
+                   if(Eeprom1.EndFalg==1)//Eeprom1正忙  
+                   {
+                        if(Eeprom1.StateFlag==6) //已完成读操作，不忙；
+                         {
+                            Eeprom1.EndFalg=0;    //取消忙位
+                            Eeprom1.StateFlag=0;
+                            SysVar[SysVarNum]=Eeprom1.Dats;
+                            SysVarNum++;
+                            if((SysVarNum)>=M_SYSVARNUM_MAX)
+                            {
+                                break;
+                             }
+                          }       
+                     }
+                }               
+         }
+         
+         if(Area==1) //SysVarUser
+         {       
+               SysVarUserNum=0;
+               while(1)
+               {
+                    if(Eeprom1.StateFlag==0)
+                    {
+                        Eeprom1.Page=1;
+                        Eeprom1.StateFlag=3;//读起动  
+                        Eeprom1.EndFalg=1; //Eeprom1正忙
+                        Eeprom1.Add=SysVarUserNum;                 
+                     }   
+      
+                     if(Eeprom1.EndFalg==1)//Eeprom1正忙  
+                     {
+                         if(Eeprom1.StateFlag==6) //已完成读操作，不忙；
+                         {
+                             Eeprom1.EndFalg=0;    //取消忙位
+                             Eeprom1.StateFlag=0;
+                             SysVarUser[SysVarUserNum]=Eeprom1.Dats;
+                             SysVarUserNum++;
+                             if((SysVarUserNum)>=M_SYSVARNUM_MAX)
+                             {
+                                 break;
+                             }
+                          }       
+                      }
+                 }               
+           }
+
+
+           if(Area==2)//ProcessVar
+           {
+               ProcessVarNum=0;
+               while(1)
+               {
+
+                    if(Eeprom1.StateFlag==0)
+                    {
+                        Eeprom1.Page=2;
+                        Eeprom1.StateFlag=3;//读起动  
+                        Eeprom1.EndFalg=1; //Eeprom1正忙
+                        Eeprom1.Add=ProcessVarNum;                 
+                    }   
+      
+                    if(Eeprom1.EndFalg==1)//Eeprom1正忙  
+                    {
+                        if(Eeprom1.StateFlag==6) //已成读操作，不忙；
+                        {
+                             Eeprom1.EndFalg=0;    //取消忙位
+                             Eeprom1.StateFlag=0;
+                             ProcessVar[ProcessVarNum]=Eeprom1.Dats;
+                             ProcessVarNum++;
+                             if(ProcessVarNum>=M_PROCESSVARNUM_MAX)
+                             {
+                                 break;
+                             }
+                         }       
+                      }
+                  }               
+
+              }
+              if(Area==3)
+               {
+                   MotorVarNum=0;
+                   while(1)
+                   {
+
+                       if(Eeprom1.StateFlag==0)
+                       {
+                           Eeprom1.Page=3;
+                           Eeprom1.StateFlag=3;//读起动  
+                           Eeprom1.EndFalg=1; //Eeprom1正忙
+                           Eeprom1.Add=MotorVarNum;                 
+                        }   
+      
+                        if(Eeprom1.EndFalg==1)//Eeprom1正忙  
+                        {
+                            if(Eeprom1.StateFlag==6) //已完成读操作，不忙；
+                            {
+                                 Eeprom1.EndFalg=0;    //取消忙位
+                                 Eeprom1.StateFlag=0;
+                                 MotorVar[MotorVarNum]=Eeprom1.Dats;
+                                 MotorVarNum++;
+                                 if(MotorVarNum>=M_MOTORVARNUM_MAX)
+                                 {
+                                     break;
+                                 }
+                            }       
+                         }
+                     }               
+
+                }
+
+}
+
+
+
+
+
+
+
+void PowerManage(void)
+{
+         DcVolt=  ((int)((((long)(AdDcVolt))*((long)DcRefK))>>14))+DcRefB;
+         NegativeDcCoeff =(((long)DcRef )<<14)/((long)DcVolt);
+         PositiveDcCoeff=(((long)DcRef )<<14)/((long)DcVolt);
+         if(PositiveDcCoeff<16383L)
+         {
+              PositiveDcCoeff=16383L;
+         }
+         if(NegativeDcCoeff>32765L)
+         {
+              NegativeDcCoeff=32765L;
+         }
+         SpeedRefMaxTmp = (((long)AllSpeedRefMax)<<14)/PositiveDcCoeff;
+         DcMaxErr=DcMaxErr+(DcVolt-DcRefMax);
+         if(DcMaxErr<=0)
+         {
+               DcMaxErr=0;
+         }
+         else if(DcMaxErr>=DcMaxErrRef)
+         {
+               DcMaxErr=DcMaxErrRef/10;
+               SysErr= M_SYSERR_OV;
+         }
+         DcMinErr=DcMinErr+(DcRefMin-DcVolt);
+         if(DcMinErr<=0)
+         {
+                DcMinErr=0;
+          }
+         else if(DcMinErr>=DcMinErrRef)
+         {
+               DcMinErr=DcMinErrRef/10;
+               if(SysErr!=M_SYSERR_POWEROFF)
+               {
+                   SysErr= M_SYSERR_DV;
+               }
+         } 
+        if((MotorState == M_MOTOR_ARREST)&&(DcVolt>DcArrestMax))
+        {
+               DcArrest2Delay++;
+               if(DcArrest2Delay>=DcArrest2DelayMax)//zhidongshibai
+               {
+                    DcArrest2Delay=DcArrest2DelayMax;
+                    RG_OFF;
+                    SysErr=M_SYSERR_ARRESTER2;
+               }
+               else
+               {
+                    RG_ON;
+               }
+         }
+         else
+         {
+               RG_OFF;
+               DcArrest2Delay=0;
+               if(SysErr==M_SYSERR_ARRESTER2)
+               {
+                    SysErr=M_SYSERR_NULL;
+               }
+         }
+         if((DischargeResDetect_OFF)&&(MotorState != M_MOTOR_ARREST))
+         {
+               DcArrestDelay++;
+               if(DcArrestDelay>=DcArrestDelayMax)//zhidongshibai           
+                {                                   
+                     DcArrestDelay=DcArrestDelayMax;
+                     SysErr=M_SYSERR_ARRESTER;
+                     RG_OFF;
+                }
+          }
+          else
+          {
+                DcArrestDelay=0;
+          }
+
+          if((SysErr==M_SYSERR_ARRESTER)||(SysErr== M_SYSERR_OV))
+          {
+               RLY_OFF;
+          }
+          else
+          {
+//                RLY_ON;
+          }
+/***************************************************************/
+          if(PowerDirection_ON)
+          {
+               LossACTime=0;            
+          }
+          else
+          {
+               LossACTime++;
+               if(LossACTime>=LossACTimeMax)
+               {   
+                   if(NoSysErrPowerOff)
+                   {
+                        LossACTime=0;
+                   }
+                   else
+                   {
+                        SysErr=M_SYSERR_POWEROFF;
+                   }     
+               }
+          }
+}
+
+
+void EleCurrentManage(void)
+{
+     if(EleCurrent>300)// 电磁铁电流大于10A
+     {
+          EleCurrent10ACount++;
+          if(EleCurrent10ACount>=10)
+          {
+               EleCurrent10ACount=10;
+               SysErr=M_SYSERR_ELEOI;
+               ELOCK_ON;
+               EleCurrent10ACount=10;
+               /****要强行放开所有开关****/
+               TaiYaJiaoELEState=0;//
+               CutFlag=0;
+               DaoFengELEState=0;//倒缝电磁铁要关掉。
+          }
+      }
+      else 
+      {
+           EleCurrent10ACount=0;
+      }
+       if(DaoFengFlag)
+       {
+       }
+       if(TaiYaJiaoFlag)
+       {
+       }
+       if(CutFlag)
+       {
+       }
+}
+
+void SysErrManage(void)
+{
+    if(SysResetVar)//系统将进入最高级别错误，不理会其它错误
+    {
+    }
+    else 
+    {
+       
+       if((SysErr))
+        {
+            if((SysErrSaveLock==0)&&(SysErr!=M_SYSERR_POWEROFF))
+            {
+                SysErrSaveLock=1;
+                for(SysErrSaveTmp2=15;SysErrSaveTmp2>0;SysErrSaveTmp2--)
+                {
+                     SysErrSave[SysErrSaveTmp2]=SysErrSave[SysErrSaveTmp2-1];
+
+                 }
+                 SysErrSave[0]=SysErr;
+                 if(SysErr==M_SYSERR_IPM)
+                  {
+                       SysErrCountSave[0]++;
+                  }
+                 else if(SysErr==M_SYSERR_OV)
+                 {
+                     SysErrCountSave[1]++;
+                 }
+                 else if(SysErr==M_SYSERR_DV)
+                 {
+                     SysErrCountSave[2]++;
+                 }
+                 else if(SysErr==M_SYSERR_ELEOI)
+                 {
+                     SysErrCountSave[3]++;
+                 }
+                 else if(SysErr==M_SYSERR_CLECUT)
+                 {
+                     SysErrCountSave[4]++;
+                 }
+                 else if(SysErr==M_SYSERR_LOCATED1)
+                 {
+                     SysErrCountSave[5]++;
+                 }
+                 else if(SysErr==M_SYSERR_LACKPHASE)
+                 {
+                     SysErrCountSave[6]++;
+                 }
+                 else if(SysErr==M_SYSERR_ROTOR_LOCKED)
+                 {
+                     SysErrCountSave[7]++;
+                 }
+                 else if(SysErr==M_SYSERR_OVER_LOAD)
+                 {
+                     SysErrCountSave[8]++;
+                 }
+                 else if(SysErr==M_SYSERR_CODER)
+                 {
+                     SysErrCountSave[9]++;
+                 }
+                 else if(SysErr==M_SYSERR_CODERNESS)
+                 {
+                     SysErrCountSave[10]++;
+                 }
+                 else if(SysErr==M_SYSERR_ARRESTER2)
+                 {
+                     SysErrCountSave[11]++;
+                 }
+                 else if(SysErr==M_SYSERR_COMM)
+                 {
+                     SysErrCountSave[12]++;
+                 }
+                 else if(SysErr==M_SYSERR_EEPROM)
+                 {
+                     SysErrCountSave[13]++;
+                 }
+                 else if(SysErr==M_SYSERR_LOCATED2)
+                 {
+                     SysErrCountSave[14]++;
+                 }
+            }
+       }
+       else
+       {
+          SysErrSaveLock=0;
+       }             
+       
+       if(SysErr>0)
+       {
+             if(SysErrRuning==0)
+             {      
+                 SysErrRuning=1;
+                 SysErrRuningAsk=1;
+             }
+             else if((AdSpdRef>0)&&(SysErrRuningAsk==0))
+             {
+                  SysErrRuningAsk=1;
+             }
+       }
+       else if(( SysErr==0)&&(SysErrRuning==1))
+       {
+                   SysErrRuning=0;
+                   SysErrRuningAsk=1;
+       }
+
+       switch (SysErr)
+       {
+         case   M_SYSERR_POWEROFF :
+         {
+
+            ProcessVarNum=0;
+            while(!ProcessNoPowerOff)
+             {
+                 if(Eeprom1.StateFlag==0)
+                 {
+                       Eeprom1.Page=2;
+                       Eeprom1.Dats=ProcessVar[ProcessVarNum];  
+                       Eeprom1.Add=ProcessVarNum;  
+                       Eeprom1.StateFlag=1;//起动写  
+                       Eeprom1.EndFalg=1; //Eeprom1正忙                
+                 }   
+      
+                 if(Eeprom1.EndFalg==1)//Eeprom1正忙  
+                 {
+                    if(Eeprom1.StateFlag==5) //已完成写操作，不忙；
+                     {
+                         Eeprom1.EndFalg=0;    //取消忙位
+                         Eeprom1.StateFlag=0;
+                         ProcessVarNum++;
+                         if((ProcessVarNum)>=M_PROCESSVARNUM_MAX)
+                         {
+                              break;
+                         }
+                     }       
+                  }
+
+             } 
+        }
+        break;
+
+        case M_SYSERR_OV :
+        {
+               if ((DcMaxErr<=0)&& (AdSpdRef==0))
+               {
+                   SysErr= M_SYSERR_NULL;
+               }
+        }
+        break;
+
+        case M_SYSERR_DV :
+        {
+     
+               if ((DcMinErr<=0)&& (AdSpdRef==0))
+               {
+                   SysErr= M_SYSERR_NULL;
+               }     
+        }
+        break; 
+      
+        case  M_SYSERR_FOOT_CONTROLLER_DOWN :
+        {
+            if(AdSpdRef==0)
+            {
+                SysErr= M_SYSERR_NULL; 
+            } 
+        }
+        break;
+        case M_SYSERR_NO_FOOT_CONTROLLER : 
+        {
+            if(AdSpdRef==0)
+            {
+                  SysErr= M_SYSERR_NULL; 
+            }
+        }
+        break;
+        case   M_SYSERR_ELEOI :
+        {
+          if((AdSpdRef==0)&&(EleCurrent<15))
+          {
+                  SysErr= M_SYSERR_NULL;
+                  ELOCK_0FF; 
+           }
+       }
+       break;
+      
+      case M_SYSERR_CODERDOWN :
+      {
+         if(((SpiRxData&0x3)==0x2)&&(AdSpdRef==0))
+         {
+              SysErr=0;
+         }
+      }
+      break;
+      case M_SYSERR_CLECUT:
+      {
+            if( (RotorMacAngle<(HaltAngle-100))&&(AdSpdRef==0))//控速器要松开
+            {
+                 SysErr= M_SYSERR_NULL; 
+                 SewProcessState=1;
+            }
+       }
+       break; 
+         
+       case  M_SYSERR_ROTOR_LOCKED :
+       {
+           SysErrDelay++;
+           if(SysErrDelay>=10)
+           {
+               SysErrDelay=10;
+               if((svpwm.IQs<5)&&(svpwm.IQs>-5))
+               {
+                   if(AdSpdRef==0)
+                   {
+                       SysErr= M_SYSERR_NULL; 
+                       SysErrDelay=0;
+                   }
+               }
+           }
+    }
+    break;
+     
+
+    case  M_SYSERR_OVER_LOAD   :
+    {
+           SysErrDelay++;
+           if(SysErrDelay>=10)
+           {
+               SysErrDelay=10;
+               if((svpwm.IQs<5)&&(svpwm.IQs>-5))
+               {
+                  if(AdSpdRef==0)
+                  {
+                     SysErr= M_SYSERR_NULL; 
+                     SysErrDelay=0;
+                  }
+               }
+           }
+    }
+    break;
+
+     case  M_SYSERR_SAFSWITCH  :
+     {
+          SysErrDelay++;
+          if(SysErrDelay>=10)
+          {
+              SysErrDelay=10;
+              if(AnQuanSwitch_ON)
+              {
+                  SysErr=M_SYSERR_NULL;
+              }
+          }
+      }
+      break;
+  
+    }//end switch
+
+  }//end else
+}
+
+
+void DixianManage(void)
+{
+    static int DiXianJiSuTmp=0;
+    if(DiXianFlag)
+    {
+          DiXianFlag=0;
+          DiXianJiSuTmp++;
+          if(DiXianJiSuTmp>=DixianJiShu)
+          {
+              DiXianJiSuTmp=0;
+              DangQianDixiZhongShu--;
+          }
+          if(DangQianDixiZhongShu<1)
+          {
+              DangQianDixiZhongShu =DixianzongShu;
+          }
+     }
+     if(SewProcessState>1)
+     {
+          if(!JianXianJiShuLock)
+          {
+               JianXianJiShu++;
+               if(JianXianJiShu>9999)
+               {
+                    JianXianJiShu=0;
+               }
+               JianXianJiShuLock=1;
+          }
+      }
+      else
+      {
+           JianXianJiShuLock=0;
+      }
+ }
+
+
+
+void SysInit(void)
+{  
+    int i=0;
+    UserInit();//Init PWM ,Pid
+    asm(" RPT #7 || NOP");
+    ReadEeprom(3);// MorotVar  Init  //wait 1s  Init Motor
+    ReadEeprom(1);// SysVarUser Init 
+    MotorVarInit();
+    SysVarUserInit();
+    EALLOW;
+    PieCtrlRegs.PIEIER3.bit.INTx1 = 1;
+    EDIS; 
+    DELAY_US(12000);
+    asm(" RPT #7 || NOP");
+    RLY_ON;  //合上继电器//编码器能不能用   
+    DELAY_US(4000);
+    PowerManage();  //只能运行一次，不然会0x21报警    
+    ImeasAOffset =ImeasA;
+    ImeasBOffset =ImeasB;
+
+    if((16!=((ImeasAOffset+15)>>5))||(16!=((ImeasBOffset+15)>>5)))
+    {
+        SysErr=M_SYSERR_CURRENTSENSOR;
+    }
+                 
+    if((SpiRxData&0x3)==0x2)//3 通讯故障/2 正常 /1 倒下，0 编码器内部故，但通讯正常
+    {  
+    }
+    else if((SpiRxData&0x3)==0x1)
+    {
+          if(SafetySwitchType==0)
+          {
+               SysErr =M_SYSERR_CODERDOWN;//1 倒下
+           }
+    }
+    else if((SpiRxData&0x3)==0x0)
+    {
+           SysErr =M_SYSERR_CODER;//0 编码器内部故，但通讯正常
+    }
+
+    if(PoweOnAngleFlag)
+    {
+         if((RotorMacAngle>650)&&(RotorMacAngle<1150))
+         {
+              MotorState=M_MOTOR_IDLE;
+         }
+         else
+         {
+              MotorState=M_MOTOR_INIT;          //电机开始动了；
+         }
+     }
+     ReadEeprom(2);         
+     ProcessVarInit();
+     
+     ELOCK_0FF;//解除电磁铁锁定，电磁铁可以动了
+
+     for(i=0;i<1000;i++)
+     {
+         AdDeal();//CPU中断已运行
+     }
+     if(EleCurrent>20)
+     {
+         SysErr=M_SYSERR_ELECURRENT;
+     }
+     if(AdSpdRef!=0)
+     {
+         SysErr=M_SYSERR_FOOT_CONTROLLER_DOWN;
+     }
+     
+    TestModelFlag=0;
+    SewModelStart=1;        
+}

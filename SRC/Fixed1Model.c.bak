@@ -1,0 +1,281 @@
+#include "DSP2803x_Device.h"     // Headerfile Include File
+#include "DSP2803x_Examples.h"   // Examples Include File
+#include "ExternGlobals.h"
+extern int Sewing_AB(int ReinforceNum,int NeedleA,int NeedleB);
+extern int Sewing_CD(int ReinforceNum,int NeedleC,int NeedleD);
+extern int MotorGetZeroAgain;
+
+void Fixed1Model(void)
+{
+    switch(SewProcessState)
+    {      
+        case 1 : 
+        {   
+             SewingIdle(Fixed1StartReinforce);
+        }
+        break;
+
+ 
+        case 2:
+        {
+           if(SewingABOk==1)
+           {
+               if((LedTieg)&&(!StartReinforcePause))
+                {
+                     MotorState=M_MOTOR_RUNING;
+                     FixedTirgStartFalg=1;
+                     SewProcessState=4;
+                     RotorCount=0;
+                     if((Fixed1A<2)||(Fixed1B<2))
+                     {
+                          RotorCountTmp=RotorCount+1;
+                     }
+                     else
+                     { 
+                          RotorCountTmp=RotorCount+2;
+                     }
+                     AdMotorIdle=0;        
+                     StartReinforceSnub=Fixed1B;          
+                }
+               else if((AdSpdRef==0)&&(MotorState==M_MOTOR_IDLE))
+                {                   
+                     AdMotorIdle=1;
+                }
+                else if(((AdSpdRef>=SpeedRefMin)&&(AdMotorIdle)))
+                {
+                    SewProcessState=4;
+                    RotorCount=0;
+                    AdMotorIdle=0;                    
+                    RotorCountTmp=RotorCount-1;                                                                            
+                }
+                else if((!StartReinforcePause)&&(AdSpdRef>=SpeedRefMin)&&((RotorCount-RotorCountTmp)>=StartReinforcePauseOffset))
+                {
+                     MotorState=M_MOTOR_RUNING;
+                     FixedTirgStartFalg=1;
+                     SewProcessState=4;
+                     RotorCount=0;                                           
+                     if((Fixed1A<2)||(Fixed1B<2))
+                     {
+                    		RotorCountTmp=RotorCount+1;                   		
+                     }
+                     else
+                     {
+                    	   RotorCountTmp=RotorCount; 	
+                     }                                                                                
+                     AdMotorIdle=0;
+                     if(AdSpdRef==0)
+                     {
+                         StartReinforceSnub=0;
+                     }
+                     else
+                     {
+                         StartReinforceSnub=Fixed1B;
+                     }          
+                }
+                else 
+                {
+                    if((RotorCount-RotorCountTmp)>=StartReinforcePauseOffset)
+                    {
+                         if(MotorState==M_MOTOR_RUNING)
+                         {
+                              MotorStopFlag=1;
+                              MotorStopHorL=(LedHaltAngle);
+                         }
+                     }
+                    
+               }
+         }
+       
+          else if( Sewing_AB(Fixed1StartReinforce,Fixed1A,Fixed1B)==0)
+          {
+               SewingABOk=1;//返回后不要立及停车，而是再等一两针再等车。
+               RotorCount=0; 
+               RotorCountTmp=RotorCount;
+               if(Fixed1A>1)
+               {
+                    StartReinforcePauseOffset=2; 
+               }
+               else
+               {
+                     StartReinforcePauseOffset=0;
+                }
+           }
+
+        }
+        break;
+
+
+/****************************************/
+      case 4 :
+      { 
+           if(EndReinforcePause) //暂停
+           {
+                if(Fixed1((Fixed1E),LedTieg,5 )==0) //暂停  //区分有没有后固缝纫
+                {
+                       SewProcessState=102;
+                }
+           }            
+           else if(Fixed1EndReinforce) //不暂停，并且有后固缝纫
+           {
+                 if (Fixed((Fixed1E),LedTieg,Fixed1C,Fixed1D )==0) 
+                 {
+                       SewProcessState=5;
+                 } 
+           }
+           else   //不暂停，并且无后固缝纫  
+           {
+                 if (Fixed1((Fixed1E),LedTieg,5 )==0) 
+                 {
+                       SewProcessState=5;
+                 } 
+           }            
+      }
+      break;
+
+
+       case 102 :
+       {
+            BeforeEndReinforce(Fixed1EndReinforce,5);
+       }
+       break;
+
+
+        case 5 :
+        {
+            if(ZhuangShuiFlag==1)
+            {
+                SewProcessState=50;
+            }
+            else if(Fixed1EndReinforce==0)
+            {
+                 MotorStopFlag=1;         
+                 MotorStopHorL=0; 
+                 SewProcessState=7;
+                 SpeedRef=0;                           
+                 DaoFengFlag=0; 
+                 if(LedCut)
+                 {                                  
+                    if((MotorState==M_MOTOR_RUNING)||(MotorState==M_MOTOR_ARREST)||(MotorState==M_MOTOR_STOPING))
+                    {                                          
+                         StopingCutFalg=2; 
+                    }
+                    else
+                    {     
+                        StopingCutFalg=1;                     
+                    }
+                }                                                                                         
+            }
+            else if( Sewing_CD(Fixed1EndReinforce,Fixed1C,Fixed1D)==0)
+            {   
+                 SewProcessState=7;
+                 if(LedCut)
+                 {
+                      DaoFengFlag=0;
+                      StopingCutFalg=1;
+                      SpeedRef = SpdCuting;
+                 }
+                 else if(MotorState==M_MOTOR_RUNING)
+                 {
+                      SpeedRef=0;
+                      MotorStopFlag=1;
+                 }
+             }    
+             AdCutFlag=50;        
+         }
+         break;
+         
+         case 50 :
+         {
+              if(Fixed1EndReinforce==0)
+              {
+                   SewProcessState=7;
+              }
+              else if( Sewing_CD(Fixed1EndReinforce,Fixed1C,Fixed1D)==0)
+              {   
+                   SewProcessState=7;
+              }           
+         }
+         break;
+          
+         case 7://重新确认
+         {     
+              if(ZhuangShuiFlag==1)
+              {                                                
+                   if ((AdSpdRef>=SpeedRefMin)&&(TaiYaJiaoFlag==0)&&(MotorState==M_MOTOR_IDLE))
+                   {
+                       SewProcessState=4;
+                       MotorState=M_MOTOR_RUNING;                                
+                       RotorCount=0;
+                       RotorCountTmp=RotorCount;
+                       FixedTirgStartFalg=1;
+                       AdCutFlag=0;                 
+                   } 
+                   else if(AdSpdRef==2)
+                   {                                                    
+                       SewProcessState=8;  //等待停止信号                          
+                       if(LedCut)
+                       {
+                            StopingCutFalg=1;//重新确认
+                            SpeedRef = SpdCuting;
+                            if(MotorState==M_MOTOR_IDLE)
+                            {
+                                 MotorState=M_MOTOR_PROCUTING;
+                            }
+                       }
+                   }  
+                   else
+                   {
+                       if(MotorState==M_MOTOR_RUNING)
+                       {
+                            SpeedRef=0;
+                            MotorStopFlag=1;
+                       }                                
+                   }  
+              }                     
+              else
+              {      
+                  if(MotorState==M_MOTOR_IDLE)
+                  {                                                                                                  
+                        SewProcessState=8;                                             
+                  }
+              }
+         }
+         break;
+         
+         case 500 ://紧急强制剪线
+         {              
+                TorsionConTrol=1;
+                MotorStopHorL=0;                
+                if(LedCut)
+                {
+                    StopingCutFalg=2;                                     
+                }       
+                if(MotorState==M_MOTOR_RUNING)
+                {
+                     SpeedRef=0;
+                     MotorStopFlag=1;
+                }                                         
+                else if(MotorState==M_MOTOR_IDLE) 
+                {
+                     SewProcessState=7;  
+                     AdCutFlag=50;   
+                }                   
+          }
+          break;
+    
+         case 8 :
+         {
+             AdSpdDelay();
+         }
+         break;
+         default :
+        {
+    
+        }
+        break;
+    
+        }//end switch
+    
+        ExigenceCut(7);
+
+}

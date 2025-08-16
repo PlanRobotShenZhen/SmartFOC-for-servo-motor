@@ -1,0 +1,296 @@
+#include "DSP2803x_Device.h"     // Headerfile Include File
+#include "DSP2803x_Examples.h"   // Examples Include File
+#include "ExternGlobals.h"
+int JingJiJianXian=0;
+int tmp21=1;
+int tmp22=1;
+
+void FoldWModel(void);
+void FoldWModel(void)
+{
+    static int MotorInitAgain=0;
+    static int AdSpdRefGetZero2=0;
+    TorsionConTrol=1;
+    switch (SewProcessState)
+    {
+        case 1 :
+        {             
+            MotorStopHorL=0;
+            if(AdSpdRef==0)
+            {
+                 if(AdSpdRefGetZero2==0)
+                 {
+                     AdSpdRefGetZero2=1;
+                 }
+                MotorInitAgain=0;
+                TaiYaJiaoStart=0;
+            }
+            if ((AdSpdRef==2)||(AdSpdRef==3))
+            {
+                if((MotorState==M_MOTOR_IDLE)&&(MotorInitAgain==0))
+                {
+                    MotorInitAgain=1;
+                    MotorStopHorL=0; //应该在上停针位
+                    if((RotorMacAngle>TiaoXianGanAngleMin)&&(RotorMacAngle<TiaoXianGanAngleMax))//考虑上停针位，还是下停针位
+                    {                           
+                    }
+                    else
+                    {
+                       MotorState=M_MOTOR_INIT;          //电机开始动了；
+                    }
+                }            
+                if(MotorState==M_MOTOR_IDLE)
+                {
+                     if((RotorMacAngle>TiaoXianGanAngleMin)&&(RotorMacAngle<TiaoXianGanAngleMax))//考虑上停针位，还是下停针位
+                     {
+                          TaiYaJiaoStart=1;   
+                     }
+                 }
+            }
+            if ((AdSpdRef>=SpeedRefMin)&&(MotorState==M_MOTOR_IDLE)&&(TaiYaJiaoFlag==0)&&(AdSpdRefGetZero2==1))
+            {          
+                 AdSpdRefGetZero2=0;
+                 AdCutFlag=0;
+                 MotorState=M_MOTOR_RUNING;
+                 RotorCount=0; 
+                 
+                 if(FoldWDcount==FoldWH-1)
+                 {  
+                       RotorCountTmp=RotorCount;
+                  }
+                  else
+                  {
+                        RotorCountTmp=RotorCount-2;
+                  }
+                  if((FoldWA<2)||(FoldWB<2))
+                  {
+                      SpeedRef=EndReinforceSpeedOneToOne;
+                      DelayEleE1Offset=DelayEleE1;
+                      DelayEleE2Offset=DelayEleE2;
+                      DelayEleS1Offset=DelayEleS1;
+                      DelayEleS2Offset=DelayEleS2; 
+                       SewProcessState=11;
+                       RotorCountTmp=RotorCount;                                              
+                  }
+                  else
+                  {
+                       DelayEleE1Offset=0;
+                       DelayEleE2Offset=0;
+                       DelayEleS1Offset=0;
+                       DelayEleS2Offset=0;                    
+                       SpeedRef=FoldWSpeed;
+                       SewProcessState=2;  
+                        
+                  }
+                                  
+              }
+          }
+          break;
+         
+          case 2 :
+          {
+              if((RotorCount-RotorCountTmp)>=FoldWA)
+              {
+                  DaoFengFlag=1;
+                  RotorCount=0;
+                  FoldWDcount++; 
+                  if(FoldWDcount==(FoldWH-1))
+                  {  
+                      RotorCountTmp=RotorCount+2;//20131025
+                  }
+                  else
+                  {
+                 	    RotorCountTmp=RotorCount;
+                  }
+                
+                  if(FoldWDcount>=FoldWH)
+                  {
+                     SewProcessState=4;
+                     FoldWDcount=0;
+                     DaoFengFlag=0;
+                     AdCutFlag=50;//fangzhi zai ce jian xian
+                     if(LedCut)
+                     {
+                          StopingCutFalg=1;
+                          SpeedRef = SpdCuting;
+                     }  
+                     if(MotorState==M_MOTOR_RUNING)
+                     {
+                         MotorStopFlag=1;
+                         MotorStopHorL=0;
+                         SpeedRef=0;
+                     }
+                 }
+                 else
+                 {
+                      SewProcessState=3;
+                 }
+             }
+             else
+             {
+                   DaoFengFlag=0;
+             }
+
+       }
+       break;
+
+       case 3 :
+       {
+            if((RotorCount-RotorCountTmp)>=FoldWB)
+            {
+                  RotorCount=0;
+                  FoldWDcount++;
+                  DaoFengFlag=0;
+                  if(FoldWDcount==(FoldWH-1))
+                  {  
+                       RotorCountTmp=RotorCount+2;
+                  }
+                  else
+                  {                   
+                       RotorCountTmp=RotorCount;
+                  }
+             
+                 if(FoldWDcount>=FoldWH)
+                  {
+                       SewProcessState=4;
+                       AdCutFlag=50;//fangzhi zai ce jian xian
+                       if(LedCut)
+                       {
+                           StopingCutFalg=1;
+                           SpeedRef = SpdCuting;
+                       }
+                       if(MotorState==M_MOTOR_RUNING)
+                       {  
+                           SpeedRef=0;
+                           MotorStopFlag=1;
+                           MotorStopHorL=0;          
+                        }
+                  }
+                  else 
+                  {
+                        SewProcessState=2;       
+                  }       
+             }
+             else
+             {
+                 DaoFengFlag=1;
+             }
+         }
+         break;
+
+         case 4:
+         {
+            if(MotorState==M_MOTOR_IDLE)
+            {                  
+                SewProcessState=5;
+                DaoFengFlag=0;
+                FoldWDcount=0;
+            }
+         }
+         break;
+         
+         case 500 :
+         {              
+                TorsionConTrol=1;
+                MotorStopHorL=0;                
+                if(LedCut)
+                {
+                    StopingCutFalg=2;                                     
+                }       
+                 if(MotorState==M_MOTOR_RUNING)
+                {
+                     SpeedRef=0;
+                      MotorStopFlag=1;
+                }                                         
+                else if(MotorState==M_MOTOR_IDLE) 
+                {
+                     SewProcessState=4;  
+                     AdCutFlag=50;   
+                }                   
+         }
+         break;
+
+         case 5 :
+         {
+            AdSpdDelay();              
+
+         }
+         break;
+         
+         case 11 :
+         {
+             
+               if(((RotorCount-RotorCountTmp))>=FoldWA)
+               {       
+                    if(FoldWDcount<(FoldWH-1))  
+                    {                 
+                         DaoFengFlag=1;
+                         RotorCount=0; 
+                         RotorCountTmp=RotorCount+tmp21;
+                         SewProcessState=22;
+                         FoldWDcount++;
+                     }
+                     else
+                     {
+                           DaoFengFlag=0;
+                           SewProcessState=4;
+                           FoldWDcount=0;
+                           AdCutFlag=50;
+                           if(LedCut)
+                           {
+                               DaoFengFlag=0;
+                               StopingCutFalg=1;
+                               SpeedRef = SpdCuting;
+                           }
+                           if(MotorState==M_MOTOR_RUNING)
+                           {  
+                                SpeedRef=0;
+                                MotorStopFlag=1;
+                                MotorStopHorL=0;          
+                           }
+                     }                                             
+                }
+         }
+         break;
+         case 22 :
+         {
+               
+               if(((RotorCount-RotorCountTmp))>=FoldWB)
+               {                       
+                       DaoFengFlag=0;
+                       if(FoldWDcount<(FoldWH-1))
+                       {
+                           FoldWDcount++;
+                           RotorCount=0;
+                           RotorCountTmp=RotorCount+tmp22;
+                           SewProcessState=11;
+                       }
+                       else
+                       {
+                           SewProcessState=4;
+                           FoldWDcount=0;
+                           AdCutFlag=50;
+                           if(LedCut)
+                           {
+                               DaoFengFlag=0;
+                               StopingCutFalg=1;
+                               SpeedRef = SpdCuting;
+                           }
+                           if(MotorState==M_MOTOR_RUNING)
+                           {  
+                               SpeedRef=0;
+                               MotorStopFlag=1;
+                                MotorStopHorL=0;          
+                           }
+                       }                                         
+                  }
+            }
+            break;         
+
+            default :
+            {
+            }
+            break;
+        }    
+        ExigenceCut(4);
+}
