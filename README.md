@@ -2,7 +2,7 @@
 本项目专为400W低压永磁同步无刷电机设计，集成工业级硬件配置与高精度控制算法，旨在提供稳定可靠的伺服驱动解决方案。硬件层面搭配17位磁编码器与高可靠性伺服驱动电路，确保位置检测精度与系统运行稳定性；软件层面基于C语言开发，可通过Keil5直接编译，便于快速部署与调试。具体控制架构如下图；
 	
 
-<img src="  ASSET\控制框架.png" alt="system" style="display: block; margin: 5px auto;zoom:85%" />
+<img src="ASSET\控制框架.png" alt="system" style="display: block; margin: 5px auto;zoom:85%" />
 
 
 控制核心与技术特点
